@@ -7,7 +7,7 @@ use strict;
 use vars qw($VERSION);
 use FileHandle;
 
-$VERSION = "3.00";
+$VERSION = "3.01";
 
 # These are the recognized field names for a SID file. They must appear in
 # the order they appear in a SID file.
@@ -979,7 +979,7 @@ sub validate {
     if (($self->{SIDdata}{startPage} == 0) or ($self->{SIDdata}{startPage} == 0xFF)) {
         $self->{SIDdata}{pageLength} = 0;
     }
-    elsif (($self->{SIDdata}{startPage} + $self->{SIDdata}{pageLength}) > 0xFF) {
+    elsif ((($self->{SIDdata}{startPage} << 8) + ($self->{SIDdata}{pageLength} << 8) - 1) > 0xFFFF) {
         $self->{SIDdata}{pageLength} = 0xFF - $self->{SIDdata}{startPage};
     }
     elsif ($self->{SIDdata}{pageLength} == 0) {
@@ -999,16 +999,16 @@ sub validate {
     }
 
     # Is the end of the relocation range within the ROM or reserved memory areas?
-    if ( (($self->{SIDdata}{startPage} + $self->{SIDdata}{pageLength} >= 0xA0) and ($self->{SIDdata}{startPage} + $self->{SIDdata}{pageLength} < 0xC0)) or
-         (($self->{SIDdata}{startPage} + $self->{SIDdata}{pageLength} >= 0xD0) and ($self->{SIDdata}{startPage}  + $self->{SIDdata}{pageLength} <= 0xFF)) or
-         (($self->{SIDdata}{startPage} + $self->{SIDdata}{pageLength}  > 0x00) and ($self->{SIDdata}{startPage} + $self->{SIDdata}{pageLength}  < 0x04)) ) {
+    if ( (( ($self->{SIDdata}{startPage} << 8) + ($self->{SIDdata}{pageLength} << 8) - 1 >= 0xA000) and ( ($self->{SIDdata}{startPage} << 8) + ($self->{SIDdata}{pageLength} << 8) - 1 < 0xC000)) or
+         (( ($self->{SIDdata}{startPage} << 8) + ($self->{SIDdata}{pageLength} << 8) - 1 >= 0xD000) and ( ($self->{SIDdata}{startPage} << 8) + ($self->{SIDdata}{pageLength} << 8) - 1 <= 0xFFFF)) or
+         (( ($self->{SIDdata}{startPage} << 8) + ($self->{SIDdata}{pageLength} << 8) - 1 > 0x0000) and  ( ($self->{SIDdata}{startPage} << 8) + ($self->{SIDdata}{pageLength} << 8) - 1 < 0x0400)) ) {
 
          $self->{SIDdata}{startPage} = 0xFF;
          $self->{SIDdata}{pageLength} = 0x00;
     }
 
     # Does the relocation range encompass a ROM area?
-    if ( ($self->{SIDdata}{startPage} < 0xA0) and ($self->{SIDdata}{startPage} + $self->{SIDdata}{pageLength} >= 0xC0) ) {
+    if ( ($self->{SIDdata}{startPage} < 0xA0) and (($self->{SIDdata}{startPage} << 8) + ($self->{SIDdata}{pageLength} << 8) - 1 >= 0xC000) ) {
 
          $self->{SIDdata}{startPage} = 0xFF;
          $self->{SIDdata}{pageLength} = 0x00;
@@ -1016,24 +1016,24 @@ sub validate {
 
     # Relocation range must not overlap or encompass the load range.
 
-    if ( ($self->{SIDdata}{startPage} >= $self->getRealLoadAddress()) and
-         ($self->{SIDdata}{startPage} <= ($self->getRealLoadAddress() + length($self->{SIDdata}{data}))
+    if ( (($self->{SIDdata}{startPage} << 8) >= $self->getRealLoadAddress()) and
+         (($self->{SIDdata}{startPage} << 8) <= ($self->getRealLoadAddress() + length($self->{SIDdata}{data}))
          ) ) {
 
          $self->{SIDdata}{startPage} = 0xFF;
          $self->{SIDdata}{pageLength} = 0x00;
     }
 
-    if ( ($self->{SIDdata}{startPage} + $self->{SIDdata}{pageLength} >= $self->getRealLoadAddress()) and
-         ($self->{SIDdata}{startPage} + $self->{SIDdata}{pageLength} <= ($self->getRealLoadAddress() + length($self->{SIDdata}{data})))
+    if ( (($self->{SIDdata}{startPage} << 8) + ($self->{SIDdata}{pageLength} << 8) - 1 >= $self->getRealLoadAddress()) and
+         (($self->{SIDdata}{startPage} << 8) + ($self->{SIDdata}{pageLength} << 8) - 1 <= ($self->getRealLoadAddress() + length($self->{SIDdata}{data})))
        ) {
 
          $self->{SIDdata}{startPage} = 0xFF;
          $self->{SIDdata}{pageLength} = 0x00;
     }
 
-    if ( ($self->{SIDdata}{startPage} < $self->getRealLoadAddress()) and
-         ($self->{SIDdata}{startPage} + $self->{SIDdata}{pageLength} > ($self->getRealLoadAddress() + length($self->{SIDdata}{data})))
+    if ( (($self->{SIDdata}{startPage} << 8) < $self->getRealLoadAddress()) and
+         (($self->{SIDdata}{startPage} << 8) + ($self->{SIDdata}{pageLength} << 8) - 1 > ($self->getRealLoadAddress() + length($self->{SIDdata}{data})))
        ) {
 
          $self->{SIDdata}{startPage} = 0xFF;

@@ -1,5 +1,8 @@
 Revision history:
 
+3.01 - Sat Nov 03 2002
+        There was a bug in the relocation page checking code. Fixed it.
+
 3.00 - Tue Oct 29 2002
         Major changes:
         - First of all, the module name was changed from Audio::PSID to
