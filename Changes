@@ -1,5 +1,12 @@
 Revision history:
 
+3.03 - Tue Jan 31 2004
+        - Added check in validate() to make sure the initAddress is within
+          the load range for PSIDs.
+        - Added complete support for the 'C64 BASIC' RSID flag: added the new
+          getC64BASIC(), isC64BASIC(), setC64BASIC() methods, changed the
+          PlaySID flag related methods. See documentation for details.
+
 3.02 - Fri Nov 22 2002
         - The load range wasn't calculated correctly when checking for the
           relocation range. Fixed it.
@@ -7,7 +14,7 @@ Revision history:
           remains an accepted alias for "released".
 
 3.01 - Sat Nov 03 2002
-        There was a bug in the relocation page checking code. Fixed it.
+        - There was a bug in the relocation page checking code. Fixed it.
 
 3.00 - Tue Oct 29 2002
         Major changes:

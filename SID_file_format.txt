@@ -75,7 +75,7 @@ version = only 2
 loadAddress = 0 (reserved)
 playAddress = 0 (reserved)
 speed = 0 (reserved)
-psidSpecific flag = 0 (reserved)
+psidSpecific flag is called C64BASIC flag
 
 The above fields MUST be checked and if any differ from the above then the
 tune MUST be rejected. The definitions above will force tunes to contain
@@ -144,7 +144,8 @@ accepting the contents of the 8-bit 6510 Accumulator as the song number
 parameter. 0 means the address is equal to the effective load address.
 
 In RSID files initAddress must never point to a ROM area ($A000-$BFFF or
-$D000-$FFFF) or be lower than $07E8.
+$D000-$FFFF) or be lower than $07E8. Also, if the C64 BASIC flag is set,
+initAddress must be 0.
 
 +0C    WORD playAddress
 
@@ -222,9 +223,10 @@ machine code must be merged to replay such a sidtune.
 - Bit 1 specifies whether the tune is PlaySID specific, e.g. uses PlaySID
   samples (psidSpecific):
   0 = C64 compatible,
-  1 = PlaySID specific.
+  1 = PlaySID specific (PSID v2NG)
+  1 = C64 BASIC flag (RSID)
 
-This is a v2NG specific field.
+This is a v2NG and RSID specific field.
 
 PlaySID samples were invented to facilitate playback of C64 volume register
 samples with the original Amiga PlaySID software. PlaySID samples made samples
@@ -244,7 +246,10 @@ files containing only original C64 code and PSID files containing PlaySID
 samples or having other PlaySID specific issues. As stated above, bit 1 in
 'flags' is reserved for this purpose.
 
-For the same reasons, this flag must always be set to 0 in RSID files.
+Since RSID files do not have the need for PlaySID samples, this flag is used
+for a different purpose: tunes that include a BASIC executable portion will
+be played (with the BASIC portion executed) if the C64 BASIC flag is set. At
+the same time, initAddress must be 0.
 
 - Bits 2-3 specify the video standard (clock):
   00 = Unknown,

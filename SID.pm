@@ -6,8 +6,9 @@ use Carp;
 use strict;
 use vars qw($VERSION);
 use FileHandle;
+use Digest::MD5;
 
-$VERSION = "3.02";
+$VERSION = "3.03";
 
 # These are the recognized field names for a SID file. They must appear in
 # the order they appear in a SID file.
@@ -24,7 +25,8 @@ my (@SIDfieldNames) = qw(magicID version dataOffset loadAddress initAddress
 
 # Constants for individual fields inside 'flags'.
 my $MUSPLAYER_OFFSET = 0; # Bit 0.
-my $PLAYSID_OFFSET   = 1; # Bit 1.
+my $PLAYSID_OFFSET   = 1; # Bit 1. (PSID v2NG only)
+my $C64BASIC_OFFSET  = 1; # Bit 1. (RSID only)
 my $CLOCK_OFFSET     = 2; # Bits 2-3.
 my $SIDMODEL_OFFSET  = 4; # Bits 4-5.
 
@@ -417,7 +419,9 @@ sub isMUSPlayerRequired {
 sub getPlaySID {
     my $self = shift;
 
+	# This is a PSID v2NG specific flag.
     return undef unless (defined($self->{SIDdata}{flags}));
+    return undef unless ($self->{SIDdata}{magicID} eq 'PSID');
 
     return (($self->{SIDdata}{flags} >> $PLAYSID_OFFSET) & 0x1);
 }
@@ -426,6 +430,22 @@ sub isPlaySIDSpecific {
     my $self = shift;
 
     return $self->getPlaySID();
+}
+
+sub getC64BASIC {
+    my $self = shift;
+
+	# This is an RSID specific flag.
+    return undef unless (defined($self->{SIDdata}{flags}));
+    return undef unless ($self->{SIDdata}{magicID} eq 'RSID');
+
+    return (($self->{SIDdata}{flags} >> $C64BASIC_OFFSET) & 0x1);
+}
+
+sub isC64BASIC {
+    my $self = shift;
+
+    return $self->getC64BASIC();
 }
 
 sub getClock {
@@ -500,6 +520,7 @@ sub set(@) {
     my $i;
     my $version;
     my $offset;
+	my $changePSIDSpecific = 0;
 
     foreach $fieldname (keys %SIDhash) {
 
@@ -518,6 +539,10 @@ sub set(@) {
                 confess ("Unrecognized magicID: $SIDhash{$fieldname}");
                 next;
             }
+
+			if ($SIDhash{$fieldname} ne $self->{SIDdata}{magicID}) {
+				$changePSIDSpecific = 1;
+			}
         }
 
         if ($fieldname eq 'version') {
@@ -583,11 +608,22 @@ sub set(@) {
             $self->{SIDdata}{reserved} = 0;
         }
 
+		if ($changePSIDSpecific) {
+			# Zero this flag only if 'flags' is not explicitly set at the same time.
+			if (!$SIDhash{'flags'}) {
+				if ($self->{SIDdata}{magicID} eq 'RSID') {
+	            	$self->setC64BASIC(0);
+				}
+				else {
+	            	$self->setPlaySID(0);
+				}
+			}
+		}
+
         # RSID values are set in stone.
         if ($self->{SIDdata}{magicID} eq 'RSID') {
             $self->{SIDdata}{playAddress} = 0;
             $self->{SIDdata}{speed} = 0;
-            $self->setPlaySID(0);
 
             # The preferred way is for loadAddress to be 0. The data is
             # prepended by those 2 bytes if it needs to be changed.
@@ -596,6 +632,11 @@ sub set(@) {
                 $self->{SIDdata}{data} = pack("v", $self->{SIDdata}{loadAddress}) . $self->{SIDdata}{data};
                 $self->{SIDdata}{loadAddress} = 0;
             }
+
+			# initAddress must be 0 if the C64 BASIC flag is set.
+			if ($self->getC64BASIC() ) {
+				$self->{SIDdata}{initAddress} = 0;
+			}
         }
     }
 
@@ -667,6 +708,11 @@ sub setMUSPlayer($) {
 sub setPlaySID($) {
     my ($self, $PlaySID) = @_;
 
+    unless ($self->{SIDdata}{magicID} eq 'PSID') {
+        confess ("Cannot set this field for RSID!");
+        return undef;
+    }
+
     unless (defined($self->{SIDdata}{flags})) {
         confess ("Cannot set this field when SID version is 1!");
         return undef;
@@ -682,6 +728,35 @@ sub setPlaySID($) {
 
     # Then set it.
     $self->{SIDdata}{flags} |= ($PlaySID << $PLAYSID_OFFSET);
+}
+
+sub setC64BASIC($) {
+    my ($self, $C64BASIC) = @_;
+
+    unless ($self->{SIDdata}{magicID} eq 'RSID') {
+        confess ("Cannot set this field for PSID!");
+        return undef;
+    }
+
+    unless (defined($self->{SIDdata}{flags})) {
+        confess ("Cannot set this field when SID version is 1!");
+        return undef;
+    }
+
+    if (($C64BASIC ne 0) and ($C64BASIC ne 1)) {
+        confess ("Specified value '$C64BASIC' is invalid!");
+        return undef;
+    }
+
+    # First, clear the bit in question.
+    $self->{SIDdata}{flags} &= ~(0x1 << $C64BASIC_OFFSET);
+
+    # Then set it.
+    $self->{SIDdata}{flags} |= ($C64BASIC << $C64BASIC_OFFSET);
+
+	if ($C64BASIC) {
+		$self->{SIDdata}{initAddress} = 0;
+	}
 }
 
 sub setClock($) {
@@ -790,8 +865,6 @@ sub getFieldNames {
 sub getMD5 {
     my ($self, $oldMD5) = @_;
 
-    use Digest::MD5;
-
     my $md5 = Digest::MD5->new;
 
     if (($self->{SIDdata}{loadAddress} == 0) and $self->{SIDdata}{data}) {
@@ -840,6 +913,7 @@ sub validate {
     my $field;
     my $MUSPlayer;
     my $PlaySID;
+	my $C64BASIC;
     my $clock;
     my $SIDModel;
 
@@ -852,7 +926,6 @@ sub validate {
     if ($self->{SIDdata}{magicID} eq 'RSID') {
         $self->{SIDdata}{playAddress} = 0;
         $self->{SIDdata}{speed} = 0;
-        $self->setPlaySID(0);
     }
 
     if ($self->{SIDdata}{dataOffset} != 0x7C) {
@@ -878,15 +951,19 @@ sub validate {
     }
 
     # If this is an RSID, initAddress shouldn't be pointing to a ROM memory
-    # area, or be outside the load range.
+    # area, or be outside the load range. Also, if the C64 BASIC flag is set,
+	# initAddress must be 0.
 
     if ( ($self->{SIDdata}{magicID} eq 'RSID') and
-         ((($self->{SIDdata}{initAddress} > 0) and ($self->{SIDdata}{initAddress} < 0x07E8)) or
-          (($self->{SIDdata}{initAddress} >= 0xA000) and ($self->{SIDdata}{initAddress} < 0xC000)) or
-          (($self->{SIDdata}{initAddress} >= 0xD000) and ($self->{SIDdata}{initAddress} <= 0xFFFF)) or
-           ($self->{SIDdata}{initAddress} < $self->getRealLoadAddress()) or
-           ($self->{SIDdata}{initAddress} > ($self->getRealLoadAddress() + length($self->{SIDdata}{data}) - 3))
-         ) ) {
+         ( ((($self->{SIDdata}{initAddress} > 0) and ($self->{SIDdata}{initAddress} < 0x07E8)) or
+            (($self->{SIDdata}{initAddress} >= 0xA000) and ($self->{SIDdata}{initAddress} < 0xC000)) or
+            (($self->{SIDdata}{initAddress} >= 0xD000) and ($self->{SIDdata}{initAddress} <= 0xFFFF)) or
+             ($self->{SIDdata}{initAddress} < $self->getRealLoadAddress()) or
+             ($self->{SIDdata}{initAddress} > ($self->getRealLoadAddress() + length($self->{SIDdata}{data}) - 3))
+           ) or
+		   ($self->getC64BASIC() )
+          )
+       ) {
 
         $self->{SIDdata}{initAddress} = 0;
 
@@ -914,6 +991,19 @@ sub validate {
            ($self->getRealLoadAddress() < 0x07E8) ) {
 
         $self->{SIDdata}{data} = pack("v", 0x07E8) . substr($self->{SIDdata}{data}, 2);
+    }
+
+    # If this is a PSID, initAddress shouldn't be outside the load range.
+
+    if ( ($self->{SIDdata}{magicID} eq 'PSID') and
+         (($self->{SIDdata}{initAddress} < $self->getRealLoadAddress()) or
+          ($self->{SIDdata}{initAddress} > ($self->getRealLoadAddress() + length($self->{SIDdata}{data}) - 3))
+         )
+       ) {
+
+        $self->{SIDdata}{initAddress} = 0;
+
+#        carp ("'initAddress' was invalid - set to 0");
     }
 
     # These fields should better be in the 0x0000-0xFFFF range!
@@ -950,19 +1040,21 @@ sub validate {
 #        carp ("Invalid 'startSong' field - set to 1");
     }
 
-    # Only the relevant fields in 'speed' will be set.
-    my $tempSpeed = 0;
-    my $maxSongs = $self->{SIDdata}{songs};
+    unless ($self->{SIDdata}{magicID} eq 'RSID') {
+    	# Only the relevant fields in 'speed' will be set.
+    	my $tempSpeed = 0;
+    	my $maxSongs = $self->{SIDdata}{songs};
 
-    # There are only 32 bits in speed.
-    if ($maxSongs > 32) {
-        $maxSongs = 32;
-    }
+	    # There are only 32 bits in speed.
+	    if ($maxSongs > 32) {
+    	    $maxSongs = 32;
+    	}
 
-    for (my $i=0; $i < $maxSongs; $i++) {
-        $tempSpeed += ($self->{SIDdata}{speed} & (1 << $i));
-    }
-    $self->{SIDdata}{speed} = $tempSpeed;
+	    for (my $i=0; $i < $maxSongs; $i++) {
+    	    $tempSpeed += ($self->{SIDdata}{speed} & (1 << $i));
+    	}
+    	$self->{SIDdata}{speed} = $tempSpeed;
+	}
 
     unless (defined($self->{SIDdata}{flags})) {
         $self->{SIDdata}{flags} = 0;
@@ -970,16 +1062,28 @@ sub validate {
     else {
         # Only the relevant fields in 'flags' will be set.
         $MUSPlayer = $self->isMUSPlayerRequired();
-        $PlaySID = $self->isPlaySIDSpecific();
         $clock = $self->getClock();
         $SIDModel = $self->getSIDModel();
+
+		if ($self->{SIDdata}{magicID} eq 'PSID') {
+        	$PlaySID = $self->isPlaySIDSpecific();
+		}
+		else {
+        	$C64BASIC = $self->isC64BASIC();
+		}
 
         $self->{SIDdata}{flags} = 0;
 
         $self->setMUSPlayer($MUSPlayer);
-        $self->setPlaySID($PlaySID);
         $self->setClock($clock);
         $self->setSIDModel($SIDModel);
+
+		if ($self->{SIDdata}{magicID} eq 'PSID') {
+	        $self->setPlaySID($PlaySID);
+		}
+		else {
+	        $self->setC64BASIC($C64BASIC);
+		}
     }
 
     if (($self->{SIDdata}{startPage} == 0) or ($self->{SIDdata}{startPage} == 0xFF)) {
@@ -1269,13 +1373,24 @@ This is an alias for $OBJECT->I<getMUSPlayer>().
 =item B<$OBJECT>->B<getPlaySID>()
 
 Returns the value of the 'psidSpecific' bit of the I<flags> field if I<flags>
-is specified (i.e. when I<version> is 2), or undef otherwise. The returned
-value is either 0 (indicating that I<data> is Commodore-64 compatible) or
-1 (indicating that I<data> is PlaySID specific).
+is specified (i.e. when I<version> is 2) and the I<magicID> is 'PSID', or
+undef otherwise. The returned value is either 0 (indicating that I<data> is
+Commodore-64 compatible) or 1 (indicating that I<data> is PlaySID specific).
 
 =item B<$OBJECT>->B<isPlaySIDSpecific>()
 
 This is an alias for $OBJECT->I<getPlaySID>().
+
+=item B<$OBJECT>->B<getC64BASIC>()
+
+Returns the value of the 'C64BASIC' bit of the I<flags> field if I<flags>
+is specified (i.e. when I<version> is 2) and the I<magicID> is 'RSID', or
+undef otherwise. The returned value is either 1 (indicating that I<data>
+has a BASIC executable portion, or 0 otherwise.
+
+=item B<$OBJECT>->B<isC64BASIC>()
+
+This is an alias for $OBJECT->I<getC64BASIC>().
 
 =item B<$OBJECT>->B<getClock>()
 
@@ -1319,6 +1434,10 @@ I<magicID> is set to 'PSID' and the I<dataOffset> field is set to 0x0076.
 
 Whenever the version number is changed to 2, the I<flags>, I<startPage>,
 I<pageLength> and I<reserved> fields are zeroed out if they are not set, yet.
+
+Whenever the I<magicID> is changed from 'RSID' to 'PSID' or vice versa and
+I<flags> is not specified at the same time, the I<psidSpecific> field for
+PSID or the I<C64BASIC> field for RSID is set to 0.
 
 Whenever the I<magicID> is set to 'RSID', the I<loadAddress>, I<playAddress>
 and I<speed> fields are set to 0, plus the 'psidspecific' bit in the I<flags>
@@ -1364,9 +1483,17 @@ merged).
 =item B<$OBJECT>->B<setPlaySID>(SCALAR)
 
 Changes the value of the 'psidSpecific' bit of the I<flags> field to SCALAR if
-I<flags> is specified (i.e. when I<version> is 2), returns an undef otherwise.
-SCALAR must be either 0 (indicating that I<data> is Commodore-64 compatible)
-or 1 (indicating that I<data> is PlaySID specific).
+I<flags> is specified (i.e. when I<version> is 2) and the I<magicID> is 'PSID',
+returns an undef otherwise. SCALAR must be either 0 (indicating that I<data>
+is Commodore-64 compatible) or 1 (indicating that I<data> is PlaySID specific).
+
+=item B<$OBJECT>->B<setC64BASIC>(SCALAR)
+
+Changes the value of the 'C64BASIC' bit of the I<flags> field to SCALAR if
+I<flags> is specified (i.e. when I<version> is 2) and the I<magicID> is 'RSID',
+returns an undef otherwise. SCALAR must be either 1 (indicating that I<data>
+has a C64 BASIC executable portion) or 0 otherwise. Setting this flag to 1
+also sets the I<initAddress> field to 0.
 
 =item B<$OBJECT>->B<setClock>(SCALAR)
 
@@ -1444,7 +1571,6 @@ setting the I<version> field to 2,
 =item *
 
 if the I<magicID> is 'RSID', setting the I<playAddress> and I<speed> fields,
-plus the 'psidspecific' bit in the I<flags> field to 0,
 
 =item *
 
@@ -1462,7 +1588,8 @@ changing the I<initAddress> to a valid non-zero value,
 =item *
 
 if the I<magicID> is 'RSID', changing the I<initAddress> to zero if it is
-pointing to a ROM/IO area ($0000-$07E8, $A000-$BFFF or $D000-$FFFF),
+pointing to a ROM/IO area ($0000-$07E8, $A000-$BFFF or $D000-$FFFF), or if
+the I<C64BASIC> flag is set to 1,
 
 =item *
 
@@ -1548,6 +1675,11 @@ More or less in order of perceived priority, from most urgent to least urgent.
 
 =item *
 
+Add Stefano's SID player engine recognizer code. Didn't somebody else have
+something like this, too?
+
+=item *
+
 Overload '=' so two objects can be assigned to each other?
 
 =back
@@ -1557,7 +1689,7 @@ Overload '=' so two objects can be assigned to each other?
 This library is free software; you can redistribute it and/or
 modify it under the same terms as Perl itself.
 
-Audio::SID Perl module - Copyright (C) 1999, 2002 LaLa <LaLa@C64.org>
+Audio::SID Perl module - Copyright (C) 1999, 2004 LaLa <LaLa@C64.org>
 
 (Thanks to Adam Lorentzon for showing me how to extract binary data from SID
 files! :-)
@@ -1566,7 +1698,7 @@ SID MD5 calculation - Copyright (C) 2001 Michael Schwendt <sidplay@geocities.com
 
 =head1 VERSION
 
-Version v3.02, released to CPAN on Nov 9, 2002.
+Version v3.03, released to CPAN on Jan 31, 2004.
 
 First version (then called Audio::PSID) created on June 11, 1999.
 
