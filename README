@@ -1,4 +1,4 @@
-Audio::SID version 3.01
+Audio::SID version 3.02
 =======================
 
 This module is designed to handle SID files (usually bearing a .sid

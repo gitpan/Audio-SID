@@ -7,13 +7,13 @@ use strict;
 use vars qw($VERSION);
 use FileHandle;
 
-$VERSION = "3.01";
+$VERSION = "3.02";
 
 # These are the recognized field names for a SID file. They must appear in
 # the order they appear in a SID file.
 my (@SIDfieldNames) = qw(magicID version dataOffset loadAddress initAddress
                           playAddress songs startSong speed name author
-                          copyright flags startPage pageLength reserved data);
+                          released flags startPage pageLength reserved data);
 
 # Additional data stored in the class that are not part of the SID file
 # format are: FILESIZE, FILENAME, and the implicit REAL_LOAD_ADDRESS.
@@ -64,7 +64,7 @@ sub initialize() {
         speed => 0,
         name => '<?>',
         author => '<?>',
-        copyright => '20?? <?>',
+        released => '20?? <?>',
         flags => 0,
         startPage => 0,
         pageLength => 0,
@@ -330,7 +330,7 @@ sub get {
     # Strip off trailing NULLs.
     $SIDhash{name} =~ s/\x00*$//;
     $SIDhash{author} =~ s/\x00*$//;
-    $SIDhash{copyright} =~ s/\x00*$//;
+    $SIDhash{released} =~ s/\x00*$//;
 
     return unless (defined(wantarray()));
 
@@ -345,6 +345,9 @@ sub get {
             return undef;
         }
     }
+
+    # Backwards compatibility.
+    $fieldname = "released" if ($fieldname =~ /^copyright$/);
 
     unless (grep(/^$fieldname$/, @SIDfieldNames)) {
         confess ("No such fieldname: $fieldname");
@@ -499,6 +502,9 @@ sub set(@) {
     my $offset;
 
     foreach $fieldname (keys %SIDhash) {
+
+        # Backwards compatibility.
+        $fieldname = "released" if ($fieldname =~ /^copyright$/);
 
         unless (grep(/^$fieldname$/, @SIDfieldNames)) {
             confess ("No such fieldname: $fieldname");
@@ -857,7 +863,7 @@ sub validate {
     # Sanity check the fields.
 
     # Textual fields can't be longer than 31 chars.
-    foreach $field (qw(name author copyright)) {
+    foreach $field (qw(name author released)) {
 
         # Strip trailing whitespace.
         $self->{SIDdata}{$field} =~ s/\s+$//;
@@ -875,11 +881,11 @@ sub validate {
     # area, or be outside the load range.
 
     if ( ($self->{SIDdata}{magicID} eq 'RSID') and
-         ((($self->{SIDdata}{initAddress} > 0) and ($self->{SIDdata}{initAddress} < 0x0801)) or
+         ((($self->{SIDdata}{initAddress} > 0) and ($self->{SIDdata}{initAddress} < 0x07E8)) or
           (($self->{SIDdata}{initAddress} >= 0xA000) and ($self->{SIDdata}{initAddress} < 0xC000)) or
           (($self->{SIDdata}{initAddress} >= 0xD000) and ($self->{SIDdata}{initAddress} <= 0xFFFF)) or
            ($self->{SIDdata}{initAddress} < $self->getRealLoadAddress()) or
-           ($self->{SIDdata}{initAddress} > ($self->getRealLoadAddress() + length($self->{SIDdata}{data})))
+           ($self->{SIDdata}{initAddress} > ($self->getRealLoadAddress() + length($self->{SIDdata}{data}) - 3))
          ) ) {
 
         $self->{SIDdata}{initAddress} = 0;
@@ -888,16 +894,16 @@ sub validate {
     }
 
     # The preferred way is for loadAddress to be 0. It also shouldn't be less
-    # than 0x0801 in RSID files. The data is prepended by those 2 bytes if it
+    # than 0x07E8 in RSID files. The data is prepended by those 2 bytes if it
     # needs to be changed.
 
     if ($self->{SIDdata}{loadAddress} != 0) {
 
-        # Load address must not be less than 0x0400 in RSID files.
+        # Load address must not be less than 0x07E8 in RSID files.
         if (($self->{SIDdata}{magicID} eq 'RSID') and
-            ($self->{SIDdata}{loadAddress} < 0x0801) ) {
+            ($self->{SIDdata}{loadAddress} < 0x07E8) ) {
 
-            $self->{SIDdata}{loadAddress} = 0x0801;
+            $self->{SIDdata}{loadAddress} = 0x07E8;
         }
 
         $self->{SIDdata}{data} = pack("v", $self->{SIDdata}{loadAddress}) . $self->{SIDdata}{data};
@@ -905,9 +911,9 @@ sub validate {
 #        carp ("'loadAddress' was non-zero - set to 0");
     }
     elsif (($self->{SIDdata}{magicID} eq 'RSID') and
-           ($self->getRealLoadAddress() < 0x0801) ) {
+           ($self->getRealLoadAddress() < 0x07E8) ) {
 
-        $self->{SIDdata}{data} = pack("v", 0x0801) . substr($self->{SIDdata}{data}, 2);
+        $self->{SIDdata}{data} = pack("v", 0x07E8) . substr($self->{SIDdata}{data}, 2);
     }
 
     # These fields should better be in the 0x0000-0xFFFF range!
@@ -1017,7 +1023,7 @@ sub validate {
     # Relocation range must not overlap or encompass the load range.
 
     if ( (($self->{SIDdata}{startPage} << 8) >= $self->getRealLoadAddress()) and
-         (($self->{SIDdata}{startPage} << 8) <= ($self->getRealLoadAddress() + length($self->{SIDdata}{data}))
+         (($self->{SIDdata}{startPage} << 8) <= ($self->getRealLoadAddress() + length($self->{SIDdata}{data}) - 3)
          ) ) {
 
          $self->{SIDdata}{startPage} = 0xFF;
@@ -1025,7 +1031,7 @@ sub validate {
     }
 
     if ( (($self->{SIDdata}{startPage} << 8) + ($self->{SIDdata}{pageLength} << 8) - 1 >= $self->getRealLoadAddress()) and
-         (($self->{SIDdata}{startPage} << 8) + ($self->{SIDdata}{pageLength} << 8) - 1 <= ($self->getRealLoadAddress() + length($self->{SIDdata}{data})))
+         (($self->{SIDdata}{startPage} << 8) + ($self->{SIDdata}{pageLength} << 8) - 1 <= ($self->getRealLoadAddress() + length($self->{SIDdata}{data}) - 3))
        ) {
 
          $self->{SIDdata}{startPage} = 0xFF;
@@ -1033,7 +1039,7 @@ sub validate {
     }
 
     if ( (($self->{SIDdata}{startPage} << 8) < $self->getRealLoadAddress()) and
-         (($self->{SIDdata}{startPage} << 8) + ($self->{SIDdata}{pageLength} << 8) - 1 > ($self->getRealLoadAddress() + length($self->{SIDdata}{data})))
+         (($self->{SIDdata}{startPage} << 8) + ($self->{SIDdata}{pageLength} << 8) - 1 > ($self->getRealLoadAddress() + length($self->{SIDdata}{data}) - 3))
        ) {
 
          $self->{SIDdata}{startPage} = 0xFF;
@@ -1076,7 +1082,7 @@ Audio:PSID - Perl module to handle SID files (Commodore-64 music files).
 
     $mySID->set(author => 'LaLa',
                  name => 'Test2',
-                 copyright => '2001 Hungarian Music Crew');
+                 released => '2001 Hungarian Music Crew');
 
     $mySID->validate();
     $mySID->write('-filename' => 'Test2.sid') or die "Couldn't write file!";
@@ -1149,7 +1155,7 @@ Initializes the object with default SID data as follows:
     startSong => 1,
     name => '<?>',
     author => '<?>',
-    copyright => '20?? <?>',
+    released => '20?? <?>',
     data => '',
 
 Every other SID field (I<loadAddress>, I<initAddress>, I<playAddress>,
@@ -1219,6 +1225,9 @@ If the fieldname given by SCALAR is unrecognized, the operation is ignored
 and an undef is returned. If SCALAR is not specified and I<get> is not called
 from an array context, the same terrible thing will happen. So try not to do
 either of these.
+
+For backwards compatibility reasons, "copyright" is always accepted as an
+alias for the "released" fieldname.
 
 =item B<$OBJECT>->B<getFileName>()
 
@@ -1324,6 +1333,9 @@ can set it higher, though, in which case either the relevant portion of the
 original extra padding bytes between the SID header and the I<data> will be
 preserved, or additional 0x00 bytes will be added between the SID header and
 the I<data> if necessary.
+
+For backwards compatibility reasons, "copyright" is always accepted as an
+alias for the "released" fieldname.
 
 =item B<$OBJECT>->B<setFileName>(SCALAR)
 
@@ -1440,7 +1452,7 @@ setting the I<dataOffset> to 0x007C,
 
 =item *
 
-chopping the textual fields of I<name>, I<author> and I<copyright> to their
+chopping the textual fields of I<name>, I<author> and I<released> to their
 maximum length of 31 characters,
 
 =item *
@@ -1450,7 +1462,7 @@ changing the I<initAddress> to a valid non-zero value,
 =item *
 
 if the I<magicID> is 'RSID', changing the I<initAddress> to zero if it is
-pointing to a ROM/IO area ($0000-$0800, $A000-$BFFF or $D000-$FFFF),
+pointing to a ROM/IO area ($0000-$07E8, $A000-$BFFF or $D000-$FFFF),
 
 =item *
 
@@ -1459,7 +1471,7 @@ I<data> with the non-zero I<loadAddress>)
 
 =item *
 
-changing the actual load address to $0801 if it is less than $0801 and the
+changing the actual load address to $07E8 if it is less than $07E8 and the
 I<magicID> is RSID,
 
 =item *
@@ -1554,7 +1566,7 @@ SID MD5 calculation - Copyright (C) 2001 Michael Schwendt <sidplay@geocities.com
 
 =head1 VERSION
 
-Version v3.00, released to CPAN on Oct 29, 2002.
+Version v3.02, released to CPAN on Nov 9, 2002.
 
 First version (then called Audio::PSID) created on June 11, 1999.
 

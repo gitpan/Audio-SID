@@ -1,5 +1,11 @@
 Revision history:
 
+3.02 - Fri Nov 22 2002
+        - The load range wasn't calculated correctly when checking for the
+          relocation range. Fixed it.
+        - Changed the "copyright" field name to "released", but "copyright"
+          remains an accepted alias for "released".
+
 3.01 - Sat Nov 03 2002
         There was a bug in the relocation page checking code. Fixed it.
 
