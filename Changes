@@ -1,5 +1,13 @@
 Revision history:
 
+3.10 - Sun Jul 17 2005
+        - Fixed MD5 calculation for RSIDs.
+        - The 'name' field is now called 'title' for consistency with
+          HVSC and other SID-related programs. 'name' is still accepted
+          for backwards compatibility.
+        - New method isRSID() that returns 'true' if the file is a RealSID,
+          'false' otherwise.
+
 3.03 - Tue Jan 31 2004
         - Added check in validate() to make sure the initAddress is within
           the load range for PSIDs.

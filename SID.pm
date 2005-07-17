@@ -8,12 +8,12 @@ use vars qw($VERSION);
 use FileHandle;
 use Digest::MD5;
 
-$VERSION = "3.03";
+$VERSION = "3.10";
 
 # These are the recognized field names for a SID file. They must appear in
 # the order they appear in a SID file.
 my (@SIDfieldNames) = qw(magicID version dataOffset loadAddress initAddress
-                          playAddress songs startSong speed name author
+                          playAddress songs startSong speed title author
                           released flags startPage pageLength reserved data);
 
 # Additional data stored in the class that are not part of the SID file
@@ -64,7 +64,7 @@ sub initialize() {
         songs => 1,
         startSong => 1,
         speed => 0,
-        name => '<?>',
+        title => '<?>',
         author => '<?>',
         released => '20?? <?>',
         flags => 0,
@@ -330,7 +330,7 @@ sub get {
     }
 
     # Strip off trailing NULLs.
-    $SIDhash{name} =~ s/\x00*$//;
+    $SIDhash{title} =~ s/\x00*$//;
     $SIDhash{author} =~ s/\x00*$//;
     $SIDhash{released} =~ s/\x00*$//;
 
@@ -350,6 +350,7 @@ sub get {
 
     # Backwards compatibility.
     $fieldname = "released" if ($fieldname =~ /^copyright$/);
+    $fieldname = "title" if ($fieldname =~ /^name$/);
 
     unless (grep(/^$fieldname$/, @SIDfieldNames)) {
         confess ("No such fieldname: $fieldname");
@@ -421,7 +422,7 @@ sub getPlaySID {
 
 	# This is a PSID v2NG specific flag.
     return undef unless (defined($self->{SIDdata}{flags}));
-    return undef unless ($self->{SIDdata}{magicID} eq 'PSID');
+    return undef if ($self->isRSID() );
 
     return (($self->{SIDdata}{flags} >> $PLAYSID_OFFSET) & 0x1);
 }
@@ -432,12 +433,18 @@ sub isPlaySIDSpecific {
     return $self->getPlaySID();
 }
 
+sub isRSID {
+    my $self = shift;
+
+    return ($self->{SIDdata}{magicID} eq 'RSID');
+}
+
 sub getC64BASIC {
     my $self = shift;
 
 	# This is an RSID specific flag.
     return undef unless (defined($self->{SIDdata}{flags}));
-    return undef unless ($self->{SIDdata}{magicID} eq 'RSID');
+    return undef if ($self->isRSID() );
 
     return (($self->{SIDdata}{flags} >> $C64BASIC_OFFSET) & 0x1);
 }
@@ -526,6 +533,7 @@ sub set(@) {
 
         # Backwards compatibility.
         $fieldname = "released" if ($fieldname =~ /^copyright$/);
+        $fieldname = "title" if ($fieldname =~ /^name$/);
 
         unless (grep(/^$fieldname$/, @SIDfieldNames)) {
             confess ("No such fieldname: $fieldname");
@@ -611,7 +619,7 @@ sub set(@) {
 		if ($changePSIDSpecific) {
 			# Zero this flag only if 'flags' is not explicitly set at the same time.
 			if (!$SIDhash{'flags'}) {
-				if ($self->{SIDdata}{magicID} eq 'RSID') {
+				if ($self->isRSID() ) {
 	            	$self->setC64BASIC(0);
 				}
 				else {
@@ -621,7 +629,7 @@ sub set(@) {
 		}
 
         # RSID values are set in stone.
-        if ($self->{SIDdata}{magicID} eq 'RSID') {
+        if ($self->isRSID() ) {
             $self->{SIDdata}{playAddress} = 0;
             $self->{SIDdata}{speed} = 0;
 
@@ -708,7 +716,7 @@ sub setMUSPlayer($) {
 sub setPlaySID($) {
     my ($self, $PlaySID) = @_;
 
-    unless ($self->{SIDdata}{magicID} eq 'PSID') {
+    if ($self->isRSID() ) {
         confess ("Cannot set this field for RSID!");
         return undef;
     }
@@ -733,7 +741,7 @@ sub setPlaySID($) {
 sub setC64BASIC($) {
     my ($self, $C64BASIC) = @_;
 
-    unless ($self->{SIDdata}{magicID} eq 'RSID') {
+    unless ($self->isRSID() ) {
         confess ("Cannot set this field for PSID!");
         return undef;
     }
@@ -884,11 +892,11 @@ sub getMD5 {
 
     for (my $i=0; $i < $songs; $i++) {
         my $speedFlag;
-        if ( ($speed & (1 << $i)) == 0) {
-            $speedFlag = 0;
+        if ( (($speed & (1 << $i)) != 0) or ($self->isRSID() ) ) {
+            $speedFlag = 60;
         }
         else {
-            $speedFlag = 60;
+            $speedFlag = 0;
         }
         $md5->add(pack("C",$speedFlag));
     }
@@ -923,7 +931,7 @@ sub validate {
         $self->{SIDdata}{version} = 2;
     }
 
-    if ($self->{SIDdata}{magicID} eq 'RSID') {
+    if ($self->isRSID() ) {
         $self->{SIDdata}{playAddress} = 0;
         $self->{SIDdata}{speed} = 0;
     }
@@ -936,7 +944,7 @@ sub validate {
     # Sanity check the fields.
 
     # Textual fields can't be longer than 31 chars.
-    foreach $field (qw(name author released)) {
+    foreach $field (qw(title author released)) {
 
         # Strip trailing whitespace.
         $self->{SIDdata}{$field} =~ s/\s+$//;
@@ -954,7 +962,7 @@ sub validate {
     # area, or be outside the load range. Also, if the C64 BASIC flag is set,
 	# initAddress must be 0.
 
-    if ( ($self->{SIDdata}{magicID} eq 'RSID') and
+    if ( ($self->isRSID() ) and
          ( ((($self->{SIDdata}{initAddress} > 0) and ($self->{SIDdata}{initAddress} < 0x07E8)) or
             (($self->{SIDdata}{initAddress} >= 0xA000) and ($self->{SIDdata}{initAddress} < 0xC000)) or
             (($self->{SIDdata}{initAddress} >= 0xD000) and ($self->{SIDdata}{initAddress} <= 0xFFFF)) or
@@ -977,7 +985,7 @@ sub validate {
     if ($self->{SIDdata}{loadAddress} != 0) {
 
         # Load address must not be less than 0x07E8 in RSID files.
-        if (($self->{SIDdata}{magicID} eq 'RSID') and
+        if (($self->isRSID() ) and
             ($self->{SIDdata}{loadAddress} < 0x07E8) ) {
 
             $self->{SIDdata}{loadAddress} = 0x07E8;
@@ -987,7 +995,7 @@ sub validate {
         $self->{SIDdata}{loadAddress} = 0;
 #        carp ("'loadAddress' was non-zero - set to 0");
     }
-    elsif (($self->{SIDdata}{magicID} eq 'RSID') and
+    elsif (($self->isRSID() ) and
            ($self->getRealLoadAddress() < 0x07E8) ) {
 
         $self->{SIDdata}{data} = pack("v", 0x07E8) . substr($self->{SIDdata}{data}, 2);
@@ -995,7 +1003,7 @@ sub validate {
 
     # If this is a PSID, initAddress shouldn't be outside the load range.
 
-    if ( ($self->{SIDdata}{magicID} eq 'PSID') and
+    if ( ($self->isRSID() ) and
          (($self->{SIDdata}{initAddress} < $self->getRealLoadAddress()) or
           ($self->{SIDdata}{initAddress} > ($self->getRealLoadAddress() + length($self->{SIDdata}{data}) - 3))
          )
@@ -1040,7 +1048,7 @@ sub validate {
 #        carp ("Invalid 'startSong' field - set to 1");
     }
 
-    unless ($self->{SIDdata}{magicID} eq 'RSID') {
+    unless ($self->isRSID() ) {
     	# Only the relevant fields in 'speed' will be set.
     	my $tempSpeed = 0;
     	my $maxSongs = $self->{SIDdata}{songs};
@@ -1065,7 +1073,7 @@ sub validate {
         $clock = $self->getClock();
         $SIDModel = $self->getSIDModel();
 
-		if ($self->{SIDdata}{magicID} eq 'PSID') {
+		unless ($self->isRSID() ) {
         	$PlaySID = $self->isPlaySIDSpecific();
 		}
 		else {
@@ -1078,7 +1086,7 @@ sub validate {
         $self->setClock($clock);
         $self->setSIDModel($SIDModel);
 
-		if ($self->{SIDdata}{magicID} eq 'PSID') {
+		unless ($self->isRSID() ) {
 	        $self->setPlaySID($PlaySID);
 		}
 		else {
@@ -1180,12 +1188,12 @@ Audio:PSID - Perl module to handle SID files (Commodore-64 music files).
 
     $mySID = new Audio::SID('-filename' => 'Test.sid') or die "Whoops!";
 
-    print "Name = " . $mySID->get('name') . "\n";
+    print "Title = " . $mySID->get('title') . "\n";
 
     print "MD5 = " . $mySID->getMD5();
 
     $mySID->set(author => 'LaLa',
-                 name => 'Test2',
+                 title => 'Test2',
                  released => '2001 Hungarian Music Crew');
 
     $mySID->validate();
@@ -1257,7 +1265,7 @@ Initializes the object with default SID data as follows:
     dataOffset => 0x7C,
     songs => 1,
     startSong => 1,
-    name => '<?>',
+    title => '<?>',
     author => '<?>',
     released => '20?? <?>',
     data => '',
@@ -1331,7 +1339,8 @@ from an array context, the same terrible thing will happen. So try not to do
 either of these.
 
 For backwards compatibility reasons, "copyright" is always accepted as an
-alias for the "released" fieldname.
+alias for the "released" fieldname and "name" is always accepted as an
+alias for "title".
 
 =item B<$OBJECT>->B<getFileName>()
 
@@ -1380,6 +1389,10 @@ Commodore-64 compatible) or 1 (indicating that I<data> is PlaySID specific).
 =item B<$OBJECT>->B<isPlaySIDSpecific>()
 
 This is an alias for $OBJECT->I<getPlaySID>().
+
+=item B<$OBJECT>->B<isRSID>()
+
+Returns 'true' if the I<magicID> is 'RSID', 'false' otherwise.
 
 =item B<$OBJECT>->B<getC64BASIC>()
 
@@ -1454,7 +1467,8 @@ preserved, or additional 0x00 bytes will be added between the SID header and
 the I<data> if necessary.
 
 For backwards compatibility reasons, "copyright" is always accepted as an
-alias for the "released" fieldname.
+alias for the "released" fieldname and "name" is always accepted as an
+alias for "title".
 
 =item B<$OBJECT>->B<setFileName>(SCALAR)
 
@@ -1578,7 +1592,7 @@ setting the I<dataOffset> to 0x007C,
 
 =item *
 
-chopping the textual fields of I<name>, I<author> and I<released> to their
+chopping the textual fields of I<title>, I<author> and I<released> to their
 maximum length of 31 characters,
 
 =item *
@@ -1689,7 +1703,7 @@ Overload '=' so two objects can be assigned to each other?
 This library is free software; you can redistribute it and/or
 modify it under the same terms as Perl itself.
 
-Audio::SID Perl module - Copyright (C) 1999, 2004 LaLa <LaLa@C64.org>
+Audio::SID Perl module - Copyright (C) 1999, 2005 LaLa <LaLa@C64.org>
 
 (Thanks to Adam Lorentzon for showing me how to extract binary data from SID
 files! :-)
@@ -1698,7 +1712,7 @@ SID MD5 calculation - Copyright (C) 2001 Michael Schwendt <sidplay@geocities.com
 
 =head1 VERSION
 
-Version v3.03, released to CPAN on Jan 31, 2004.
+Version v3.10, released to CPAN on Jul 17, 2005.
 
 First version (then called Audio::PSID) created on June 11, 1999.
 

@@ -187,7 +187,7 @@ WARNING: This field does not work in PlaySID for Amiga like it was intended,
 therefore the above is a redefinition of the original 'speed' field in SID
 v2NG! See also the 'clock' (video standard) field described below for 'flags'.
 
-+16    ``<name>''
++16    ``<title>''
 +36    ``<author>''
 +56    ``<released>'' (also known as ``<copyright>'')
 
