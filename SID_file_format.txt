@@ -191,9 +191,9 @@ v2NG! See also the 'clock' (video standard) field described below for 'flags'.
 +36    ``<author>''
 +56    ``<released>'' (also known as ``<copyright>'')
 
-These are 32 byte long zero terminated ASCII character strings. Upon
-evaluating the header, a zero byte will always be put into the last byte of
-each string. So the maximum number of available free characters is 31.
+These are 32 byte long zero terminated ISO 8859-1 ASCII character strings.
+Upon evaluating the header, a zero byte will always be put into the last byte
+of each string. So the maximum number of available free characters is 31.
 
 +76    <data>
 

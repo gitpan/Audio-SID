@@ -7,8 +7,9 @@ use strict;
 use vars qw($VERSION);
 use FileHandle;
 use Digest::MD5;
+use Encode;
 
-$VERSION = "3.10";
+$VERSION = "3.11";
 
 # These are the recognized field names for a SID file. They must appear in
 # the order they appear in a SID file.
@@ -190,7 +191,7 @@ sub read {
     $totsize += $size;
 
     $hdrlength = 2*5+4+32*3;
-    (@hdr) = unpack ("nnnnnNa32a32a32", substr($hdr,0,$hdrlength));
+    (@hdr) = unpack ("nnnnnNA32A32A32", substr($hdr,0,$hdrlength));
 
     if ($version > 1) {
         my @temphdr;
@@ -296,11 +297,17 @@ sub write {
         $self->validate();
     }
 
+    # SID files use ISO 8859-1 encoding for textual fields, not Unicode.
+    foreach (qw/title author released/) {
+        $self->{SIDdata}{$_} = encode("latin1", $self->{SIDdata}{$_});
+    }
+
     for ($i=0; $i <= 11; $i++) {
         $hdr[$i] = $self->{SIDdata}{$SIDfieldNames[$i]};
     }
 
-    $output = pack ("A4nnnnnnnNa32a32a32", @hdr);
+    $output = pack ("A4nnnnnnnNA32A32A32", @hdr);
+
     print $FH $output;
 
     # SID version 2 has 4 more fields.
@@ -444,7 +451,7 @@ sub getC64BASIC {
 
 	# This is an RSID specific flag.
     return undef unless (defined($self->{SIDdata}{flags}));
-    return undef if ($self->isRSID() );
+    return undef unless ($self->isRSID() );
 
     return (($self->{SIDdata}{flags} >> $C64BASIC_OFFSET) & 0x1);
 }
@@ -566,6 +573,11 @@ sub set(@) {
 
             confess ("Can't change '$fieldname' when SID version is set to 1");
             next;
+        }
+
+        # SID files use ISO 8859-1 encoding for textual fields, not Unicode.
+        if (($fieldname eq 'title') or ($fieldname eq 'author') or ($fieldname eq 'released')) {
+            $SIDhash{$fieldname} = encode("latin1", $SIDhash{$fieldname});
         }
 
         $self->{SIDdata}{$fieldname} = $SIDhash{$fieldname};
@@ -948,6 +960,9 @@ sub validate {
 
         # Strip trailing whitespace.
         $self->{SIDdata}{$field} =~ s/\s+$//;
+
+        # Convert to ISO 8859-1 ASCII.
+        $self->{SIDdata}{$field} = encode("latin1", $self->{SIDdata}{$field});
 
         # Take off any superfluous null-padding.
         $self->{SIDdata}{$field} =~ s/\x00+$//;
@@ -1466,6 +1481,12 @@ original extra padding bytes between the SID header and the I<data> will be
 preserved, or additional 0x00 bytes will be added between the SID header and
 the I<data> if necessary.
 
+Note that the textual fields (I<title>, I<author>, or I<released>) will
+always be converted to ISO 8859-1 ASCII encoding (i.e. single byte ASCII
+chars), even if they were Unicode to begin with. This might result in some
+Unicode characters without ASCII equivalents getting changed to a
+question mark ('?').
+
 For backwards compatibility reasons, "copyright" is always accepted as an
 alias for the "released" fieldname and "name" is always accepted as an
 alias for "title".
@@ -1597,6 +1618,11 @@ maximum length of 31 characters,
 
 =item *
 
+changing the characters of the textual fields of I<title>, I<author> and
+I<released> to ISO 8859-1 ASCII bytes (i.e. NOT Unicode),
+
+=item *
+
 changing the I<initAddress> to a valid non-zero value,
 
 =item *
@@ -1712,7 +1738,7 @@ SID MD5 calculation - Copyright (C) 2001 Michael Schwendt <sidplay@geocities.com
 
 =head1 VERSION
 
-Version v3.10, released to CPAN on Jul 17, 2005.
+Version v3.11, released to CPAN on Aug 14, 2005.
 
 First version (then called Audio::PSID) created on June 11, 1999.
 
